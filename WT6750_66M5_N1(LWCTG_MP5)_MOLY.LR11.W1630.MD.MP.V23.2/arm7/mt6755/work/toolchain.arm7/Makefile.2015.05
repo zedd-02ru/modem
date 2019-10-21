@@ -1,0 +1,18 @@
+BUILDROOT_VERSION="2015.05"
+UCLIBC_VERSION="0.9.33"
+
+all: src config build
+
+src:
+	@sh -c "if [ ! -d buildroot-$(BUILDROOT_VERSION) ]; then \
+		tar jxvf buildroot-$(BUILDROOT_VERSION).tar.bz2; \
+		cp -a patch/* buildroot-$(BUILDROOT_VERSION)/; \
+	fi"
+
+config:
+	@sh -c "if [ ! -f buildroot-$(BUILDROOT_VERSION)/.config ]; then \
+		cp buildroot-$(BUILDROOT_VERSION).config buildroot-$(BUILDROOT_VERSION)/.config; \
+	fi"
+	
+build:
+	@sh -c "export PATH=$(PWD):$(PATH) && cd buildroot-$(BUILDROOT_VERSION) && make"

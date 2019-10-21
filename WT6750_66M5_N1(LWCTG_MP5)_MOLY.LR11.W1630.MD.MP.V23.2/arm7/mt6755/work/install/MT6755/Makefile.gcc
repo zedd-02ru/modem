@@ -1,0 +1,227 @@
+CC := $(CROSS)gcc
+AS := $(CROSS)as
+ifeq ($(strip $(GCC_LTO_SUPPORT)),1)
+AR := $(CROSS)gcc-ar
+NM := $(CROSS)gcc-nm
+else
+AR := $(CROSS)ar
+NM := $(CROSS)nm
+endif
+LD := $(CROSS)ld
+STRIP := $(CROSS)strip
+OBJDUMP := $(CROSS)objdump
+OBJCOPY := $(CROSS)objcopy
+
+# CPU / Platform related flags
+AFLAGS_AUTOIT   :=$(call as-option,-Wa$(comma)-mimplicit-it=always,-Wa$(comma)-mauto-it)
+AFLAGS_NOWARN   :=$(call as-option,-Wa$(comma)-mno-warn-deprecated,-Wa$(comma)-W)
+
+ifeq ($(strip $(SUPPORT_THUMB_MODE)),1)
+CFLAGS_THUMB2   :=-mthumb $(AFLAGS_AUTOIT) $(AFLAGS_NOWARN)
+else
+CFLAGS_THUMB2   :=-marm $(AFLAGS_AUTOIT) $(AFLAGS_NOWARN)
+endif
+AFLAGS_THUMB2   :=$(CFLAGS_THUMB2)
+
+GCC_INCLUDE_DIR := $(shell $(CC) -print-file-name=include)
+
+PLATFORM_CFLAGS := -march=armv5te
+
+PLATFORM_CFLAGS += -fno-common -fno-exceptions
+ifeq ($(strip $(ENABLE_BACKTRACE)),1)
+PLATFORM_CFLAGS += -fno-omit-frame-pointer
+CFLAGS += -DENABLE_BACKTRACE=1
+endif
+PLATFORM_CFLAGS += -mlittle-endian $(CFLAGS_THUMB2)
+ifeq ($(strip $(SUPPORT_THUMB_MODE)),1)
+#PLATFORM_CFLAGS += -Wa,-mimplicit-it=thumb
+PLATFORM_CFLAGS += -Wa,-mimplicit-it=arm
+else
+PLATFORM_CFLAGS += -Wa,-mimplicit-it=arm
+endif
+PLATFORM_CFLAGS += -D$(subst -,,$(CPUID))
+
+PLATFORM_AFLAGS := $(PLATFORM_CFLAGS)
+
+#OFLAGS := -O2 -fno-builtin
+OFLAGS := -O2 -g -gdwarf-2
+
+#mode options
+ifeq ($(strip $(LOAD_ON_TCM)),1)
+AFLAGS += -Wa,--defsym,LOAD_ON_TCM=1
+CFLAGS += -DLOAD_ON_TCM=1
+endif
+
+ifeq ($(strip $(SYS_CTRL_TCM)),1)
+AFLAGS += -Wa,--defsym,SYS_CTRL_TCM=1
+CFLAGS += -DSYS_CTRL_TCM
+endif
+
+ifeq ($(strip $(ARM7_ENABLE)),1)
+AFLAGS += -Wa,--defsym,ARM7_ENABLE=1
+CFLAGS += -DARM7_ENABLE
+endif
+
+ifeq ($(strip $(SUPPORT_THUMB_MODE)),1)
+AFLAGS += -Wa,--defsym,USE_THUMB_MODE=1
+CFLAGS += -DUSE_THUMB_MODE
+endif
+
+ifneq ("x$(strip $(MDCORE))","x")
+AFLAGS += -Wa,--defsym,MDCORE=$(strip $(MDCORE)) -Wa,--defsym,$(strip $(MDCORE))=1
+CFLAGS += -DMDCORE=$(strip $(MDCORE)) -D$(strip $(MDCORE))=1
+endif
+
+PROJ_NAME_IS_CHAR := 0
+
+ifneq ("x$(strip $(CHIPID))","x")
+	ifeq ($(strip $(PROJ_NAME_IS_CHAR)),1)
+		AFLAGS += -Wa,--defsym,CHIPID=$(strip $(CHIPID)) -Wa,--defsym,$(strip $(CHIPID))=1
+		CFLAGS += -DCHIPID=$(strip $(CHIPID)) -D$(strip $(CHIPID))=1
+	else
+		AFLAGS += -Wa,--defsym,CHIPID=$(strip $(CHIPID)) -Wa,--defsym,MT$(strip $(CHIPID))=1
+		CFLAGS += -DCHIPID=$(strip $(CHIPID)) -DMT$(strip $(CHIPID))=1
+	endif
+endif
+
+#CPU Clock, Bus Clock Setting
+
+#Set DRAM SIZE
+CFLAGS += -DDRAM_SIZE=$(strip $(DRAM_SIZE))
+
+#DEF_INCLUDE = -I$(ROOT)/inc -I${GCC_INCLUDE_DIR}
+DEF_INCLUDE = -I$(ROOT)/inc
+INCLUDE     = $(DEF_INCLUDE)
+
+DEP_LIBS_LD = -L. -L $(ROOT)/lib \
+			-Xlinker --start-group \
+			$(foreach _LIB, $(DEP_LIBS), -Xlinker -l$(_LIB)) \
+			$(foreach _LIB, $(SYS_LIBS), -Xlinker -l$(_LIB)) \
+			-Xlinker -lc -Xlinker -lgcc\
+			-Xlinker --end-group
+
+LDFLAGS += -nodefaultlibs -Bstatic -Wl,-Map,final_image.map -T$(PREFIX)/ldscript/final_image.lds
+
+#remove uncall function
+CFLAGS  += -ffunction-sections -fdata-sections
+LDFLAGS += -ffunction-sections -fdata-sections -Wl,--gc-sections 
+ifeq ($(strip $(GCC_LTO_SUPPORT)),1)
+CFLAGS  += -flto
+LDFLAGS += -flto
+endif
+
+ifeq ($(strip $(SUPPORT_THUMB_MODE)),1)
+CFLAGS  += -mthumb-interwork
+LDFLAGS += -mthumb-interwork
+endif
+
+CFLAGS += -Wall -Werror
+CFLAGS += $(PLATFORM_CFLAGS) $(OFLAGS)
+AFLAGS += $(PLATFORM_AFLAGS) $(OFLAGS)
+
+
+LDFLAGS += -L$(shell dirname `$(CC) $(CFLAGS) -print-libgcc-file-name`)
+LDFLAGS += -L$(shell dirname `$(CC) $(CFLAGS) -print-file-name=libc.a`)
+LDFLAGS += -Xlinker --entry=EXCEPTION_Vectors
+LDFLAGS += $(DEP_LIBS_LD)
+
+# build target depedency
+VPATH	?= src $(SUBVPATH)
+VOBJ 	?= 	$(addprefix $(OBJDIR)/$(NAME)/,$(patsubst %.S,%.o, \
+			$(patsubst %.s,%.o, \
+			$(patsubst %.c,%.o, \
+			$(patsubst %.cpp, %.o, \
+				$(notdir $(foreach DIR,$(VPATH),\
+					$(wildcard $(DIR)/*.S)	\
+					$(wildcard $(DIR)/*.s)	\
+					$(wildcard $(DIR)/*.c) 	\
+					$(wildcard $(DIR)/*.cpp))))))))
+
+LPATH	?= src $(SUBLPATH)
+VPATH   += $(LPATH)
+LOBJ 	?= 	$(addprefix $(OBJDIR)/$(NAME)/,$(patsubst %.S,%.o, \
+			$(patsubst %.s,%.o, \
+			$(patsubst %.c,%.o, \
+			$(patsubst %.cpp, %.o, \
+				$(notdir $(foreach DIR,$(LPATH),\
+					$(wildcard $(DIR)/*.S)	\
+					$(wildcard $(DIR)/*.s)	\
+					$(wildcard $(DIR)/*.c) 	\
+					$(wildcard $(DIR)/*.cpp))))))))
+COBJ    ?=	$(addprefix $(OBJDIR)/$(NAME)/,$(patsubst %.c,%.o, \
+			$(patsubst %.cpp, %.o, \
+				$(notdir $(foreach DIR,$(VPATH),\
+					$(wildcard $(DIR)/*.c) 	\
+					$(wildcard $(DIR)/*.cpp))))))
+
+DEP 	= $(COBJ:%.o=%.d)
+#TEST	= $(COBJ:%.o=%.x)
+#RUNS	= $(COBJ:%.o=%.x.run)
+
+CFLAGS += $(CFLAGS_ADD)
+
+CFLAGS += $(INCLUDE)
+
+LIB_P=$(addprefix $(OBJDIR)/$(NAME)/,$(LIB))
+
+.PHONY: default all
+default: all
+
+all: $(LIB_P) $(ALL) 
+
+prepare_env: $(PRE_INSTALL)
+	mkdir -p $(OBJDIR)/$(NAME)/
+
+sinclude $(DEP)
+
+$(OBJDIR)/$(NAME)/%.o : %.c 
+	$(CC) $(CFLAGS) $(CONFIG) -c $< -o $@
+
+$(OBJDIR)/$(NAME)/%.o: %.S
+	$(CC) $(CFLAGS) $(AFLAGS) $(CONFIG) -c $< -o $@
+
+$(OBJDIR)/$(NAME)/%.o: %.s
+	$(AS) $(ASFLAGS) -c $< -o $@
+
+#$(OBJDIR)/$(NAME)/%.d: %.c
+	#@$(CC) -M $(CFLAGS) $(CONFIG) $< > $@ 2> /dev/null
+
+$(OBJDIR)/$(NAME)/lib$(NAME).a:$(LOBJ)
+ifeq ($(strip $(IS_SDK_BUILD)),y)
+	$(STRIP) -d $?
+endif
+	$(AR) r $@ $?
+lib: $(LIB_P)
+	@echo "[build libs] done"
+
+%.axf: $(LIB_P)
+	$(CC) $(CFLAGS) $(CONFIG) -D _EXE_ -o $(notdir $(<:%.c=%.e.o)) -c $<
+	$(CC) -o $@ $(notdir $(<:%.c=%.e.o)) $(LDFLAGS) $(CFLAGS)
+
+
+%.elf.bin: %.elf
+	$(OBJCOPY) -O binary $^ $@
+	$(OBJDUMP) -x $^ > final_image.sym
+
+clean: $(CLEAN)
+	rm -f $(VOBJ) $(LOBJ) $(COBJ) $(OBJDIR)/$(NAME)/lib$(NAME).a $(ROOT)/lib/lib$(NAME).a
+	rm -rf $(OBJDIR)/$(NAME)
+
+install: $(INSTALL)
+	mkdir -p $(ROOT)/lib/
+	install -p $(LIB_P) $(ROOT)/lib/
+	bash -c 'if [ -e inc ]; then if [ ! -e $(ROOT)/inc/$(NAME) ]; then rm -rf $(ROOT)/inc/$(NAME)/*; mkdir -p $(ROOT)/inc/$(NAME); cp -r inc/* $(ROOT)/inc/$(NAME)/; fi fi'
+
+#.PHONY: $(TARGET_IMAGE)
+$(TARGET_IMAGE):
+	@rm -f $(TARGET_IMAGE)
+	$(CC) -o $@ $(LDFLAGS) $(CFLAGS)
+
+# Original
+.PHONY: %.code
+%.code : %
+	$(OBJDUMP) -DSlx $* > $@
+	cp $@ image.code
+
+
+

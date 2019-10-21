@@ -1,0 +1,58 @@
+PREFIX 	 := ../../install/$(PLATFORM)
+ROOT     := $(PREFIX)
+ALL       = all_mod
+TOPDIR   := $(shell pwd)
+MAKE_F = make -f Makefile.final
+
+include $(PREFIX)/Makefile.conf
+
+DEP_LIBS := $(shell ls lib/*.a | cut -d '.' -f 1 | cut -d '/' -f 2 | cut -c 4-)
+
+include $(PREFIX)/Makefile.gcc
+TOOLCHAIN_MAKEFILE := Makefile.gcc
+
+_default: all_mod all
+
+all_mod:
+	@rm -f $(TARGET_IMAGE) $(TARGET_IMAGE).bin $(TARGET_IMAGE).code
+
+	@chmod a+w $(PREFIX)/ldscript/final_image.lds
+
+ifeq ($(strip $(GCC_LTO_SUPPORT)),1)
+	@$(NM) $(ROOT)/lib/*.a | grep "T __entry_" | sed "s/^.* T \(.*\)/EXTERN\(\1\)/g"  >> $(PREFIX)/ldscript/final_image.lds;
+	@$(NM) $(ROOT)/lib/*.a | grep "T __entry_breset_" | sed "s/^.* T \(.*\)/EXTERN\(\1\)/g"  >> $(PREFIX)/ldscript/final_image.lds;
+	@$(NM) $(ROOT)/lib/*.a | grep "T __reset_" | awk -F" " '{ print "EXTERN("$$3")" }' >> $(PREFIX)/ldscript/final_image.lds
+	@$(NM) $(ROOT)/lib/*.a | grep "T __entry_breset_" | awk -F" " '{ print "EXTERN("$$3")" }' >> $(PREFIX)/ldscript/final_image.lds
+else
+	@$(NM) $(ROOT)/lib/*.a | grep "D __entry_" | sed "s/^.* D \(.*\)/EXTERN\(\1\)/g"  >> $(PREFIX)/ldscript/final_image.lds;
+	@$(NM) $(ROOT)/lib/*.a | grep "D __entry_breset_" | sed "s/^.* D \(.*\)/EXTERN\(\1\)/g"  >> $(PREFIX)/ldscript/final_image.lds;
+	@$(NM) $(ROOT)/lib/*.a | grep "D __reset_" | awk -F" " '{ print "EXTERN("$$3")" }' >> $(PREFIX)/ldscript/final_image.lds
+	@$(NM) $(ROOT)/lib/*.a | grep "D __entry_breset_" | awk -F" " '{ print "EXTERN("$$3")" }' >> $(PREFIX)/ldscript/final_image.lds
+endif
+	$(MAKE_F) final_image    
+	
+.PHONY:
+
+distclean: clean
+	rm -rf $(ROOT)/
+	rm -f *.log
+
+final_image: $(TARGET_IMAGE)
+	$(MAKE_F) $(TARGET_IMAGE).bin
+#	$(MAKE_F) $(TARGET_IMAGE).bin.hex
+	$(MAKE_F) $(TARGET_IMAGE).code
+%.hex: %
+	hexdump -v -e ' 2/4 "%08X" "\n"' $* | sed 's/^\([0-9A-Z]\{8\}\)\([0-9A-Z]\{8\}\)/\2\1/g' > $@
+	cp $@ image.hex
+#	hexdump -v -e ' 1/8 "%016X" "\n"' $* > $@
+#	hexdump -v -e ' 1/4 "%08X" "\n"' $* > $@
+
+help:
+	@echo ""
+	@echo "Usage: make [ clean | distclean ]"
+	@echo "  NoOption                  build all modules and target image"
+	@echo "  clean                     clean all objects, dep files, libs"
+	@echo "  distclean                 clean all objects, dep files, libs, configurations"
+	@echo "                            make distclean if the configurations(config, Makefile) are changed"
+	@echo ""
+

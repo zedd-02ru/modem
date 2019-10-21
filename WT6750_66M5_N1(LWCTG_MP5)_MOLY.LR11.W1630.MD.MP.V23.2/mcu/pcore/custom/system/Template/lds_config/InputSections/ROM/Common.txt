@@ -1,0 +1,8 @@
+        * (SNORCODE*)
+        * (SECOND_PART*)
+        * (.text*)
+        * (.rodata*)
+        * (i.*)
+        * (.ARM.extab*)
+        * (CRYPTO_ASM)
+        KEEP(* (Keep_CODE))

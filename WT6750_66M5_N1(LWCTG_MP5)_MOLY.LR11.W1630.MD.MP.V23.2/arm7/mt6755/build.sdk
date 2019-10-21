@@ -1,0 +1,96 @@
+#!/usr/bin/perl
+
+$PROJECT="mt6755";
+$PROJECT_FILENAME = "config/".$PROJECT.".config";
+$PRJ_FILENAME="MT6755";
+$ENV{'PRJ_FILENAME'} = $PRJ_FILENAME;
+
+require "build_comm.pl";
+
+#set environment
+$PATH = $ENV{'PATH'};
+$ENV{'PATH'} = "$BUILD_PATH/output/host/usr/bin:../install/bin:$BUILD_PATH/usr/bin:$BUILD_PATH/bin:$PATH";
+$ENV{'CONFIG_CROSS_COMPILER_PATH'} = "$CONFIG_CROSS_COMPILER_PATH";
+$ENV{'WORKDIR'} = "$WORKDIR";
+$ENV{'OUTDIR'} = "$OUTDIR";
+
+system("mkdir -p $WORKDIR/install/$PLATFORM/ldscript && cp -af bin/$PLATFORM/ldscript/* $WORKDIR/install/$PLATFORM/ldscript/");
+
+my $ARGC = @ARGV;
+my $LOGFILE = "$LOGDIR/build.log";
+
+if($ARGC eq 0){
+	usage();
+}
+
+open(LOGFILE ,">$LOGFILE") || die "can't open $LOGFILE\n";
+
+$CONFIG_FILENAME = $ARGV[0];
+die "$CONFIG_FILENAME is not found\n" if (! -e $CONFIG_FILENAME);
+
+LOG("use $CONFIG_FILENAME PROJECT=".$ENV{'PROJECT'}."\n");
+LOG("======================================================================================================\n");
+system("chmod -R a+w work");
+
+@configs = ();
+#@etc_sl = ("TZ", "AllMap", "AllFile", "nvram", "default.cfg", "conf", "cron", "dropbear", "sc", "sncfg", "mdl");
+
+#read configuration file
+open(CONFIG_FILE, "$CONFIG_FILENAME");
+while(<CONFIG_FILE>)
+{
+	my @args = split;
+	my $rec = {};
+
+	#skip comments
+	if($args[0] !~ m/^#/ && scalar(@args) >= 1){
+		$rec->{'name'} = $args[0];
+
+		shift @args;
+		$rec->{'opt'} = "@args";
+
+		push @configs, $rec;
+	}
+}
+close(CONFIG_FILE);
+
+&complist_log();
+
+if($ARGC eq 1){
+	system("mkdir -p $ROOT");
+    #build_rootfs_dir("$ROOT");
+
+	#Async module build & pack
+	if($ASYNC_BUILD eq 'y'){
+		module_source_dep();
+		module_build_async(3, "", "");
+		module_build_async(1, "", "");
+	}else{
+		#module build
+		foreach my $rec (@configs){
+			if(-e "$WORKDIR/".$rec->{'name'}."/Makefile"){
+				module_prepare($rec);
+			}
+		}
+		foreach my $rec (@configs){
+			if(-e "$WORKDIR/".$rec->{'name'}."/Makefile"){
+				module_build($rec);
+			}
+		
+			unless (-e "$WORKDIR/".$rec->{'name'}) {
+				LOG(sprintf("No module %s [FAIL]", $rec->{'name'})); 
+				die;
+			}
+	
+		}
+	}
+    module_final();
+}
+
+close(LOGFILE);
+
+sub usage()
+{
+	print "./build.sdk build.config\n";
+	exit;
+}
